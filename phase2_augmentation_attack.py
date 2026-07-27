@@ -17,7 +17,7 @@ comparison is apples-to-apples.
   The augmentation attack is strongest when the target was trained WITH the same
   augmentations, because then members are specifically robust to them. So this may
   only modestly beat the gap baseline. That result is itself the answer to the
-  "what about models not trained with augmentation?" thread in the README.
+  question of what happens with models not trained with augmentation.
 
 Run on Google Colab: Runtime > Change runtime type > GPU.
 """
