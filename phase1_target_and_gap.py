@@ -6,7 +6,6 @@ the GAP ATTACK baseline — predict "member" iff the model classifies the point 
 This is the simplest label-only attack and the baseline every fancier attack must beat.
 
 Run on Google Colab: Runtime > Change runtime type > GPU. torchvision auto-downloads CIFAR-10.
-(Primer: ../../Study/label-only-mi-primer.md — see the "gap attack" + "why MI works" sections.)
 """
 import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
