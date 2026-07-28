@@ -45,17 +45,23 @@ The augmentation attack beats the gap baseline, reproducing the paper's core cla
 Ablations and a paired significance test, run from the saved vectors without retraining anything. The refit reproduces the published 0.7498 exactly, so these are read off the same model that produced it.
 
 ```
-subset                                     n     acc   vs gap
-all queries (published attack)            47  0.7498  +0.0310
-identity only (= gap attack)               1  0.7188  +0.0000
-drop identity group                       44  0.7490  +0.0302
-near cluster only (|r|<=3, d<=1)          11  0.7436  +0.0248
-drop near cluster                         36  0.7178  -0.0010
-paper in-range only (1<=r<=8, 1<=d<=2)    25  0.7478  +0.0290
-out-of-range only                         23  0.7188  +0.0000
+subset                                     n     acc   vs gap  of gain
+all queries (published attack)            47  0.7498  +0.0310    100%
+identity only (= gap attack)               1  0.7188  +0.0000      0%
+drop identity group                       44  0.7490  +0.0302     97%
+near cluster, as 11 columns               11  0.7436  +0.0248     80%
+near cluster, duplicates removed           9  0.7422  +0.0234     75%
+near cluster, no identity at all           8  0.7422  +0.0234     75%
+rotations |r| in 2..3 only                 4  0.7416  +0.0228     74%
+translations d=1 only                      4  0.7160  -0.0028     -9%
+drop near cluster                         36  0.7178  -0.0010     -3%
+paper in-range only (1<=r<=8, 1<=d<=2)    25  0.7478  +0.0290     94%
+out-of-range only                         23  0.7188  +0.0000      0%
 ```
 
-**The gain is concentrated in small perturbations, and the un-augmented query is redundant.** Eleven near queries recover 80% of the effect; the remaining 36 land marginally below the one-query gap baseline. Removing the identity query altogether costs 0.0008, because `rotate ±2` agree with it on 98% of points and stand in for it. Large rotations carry *negative* weight — surviving a 14° rotation is evidence against membership. That is why equal-weight counting loses: it lets three dozen uninformative and sign-flipped columns outvote the handful that carry signal.
+**The gain is concentrated in a handful of small rotations, and the un-augmented query is redundant.** Four rotations — `±2°` and `±3°` — recover 74% of the effect on their own, without the un-augmented query at all. Widening to the nine distinct queries within `|r| ≤ 3, d ≤ 1` reaches 75%, and the remaining 36 land marginally below the one-query gap baseline. Removing identity costs 0.0008 against the full set and *nothing at all* inside the near cluster, because `rotate ±2` agree with it on 98% of points and stand in for it. The `d=1` translations contribute 0.0006 on top of the rotations and score below the gap baseline alone, so on this target the signal is rotational. Large rotations carry *negative* weight — surviving a 14° rotation is evidence against membership. That is why equal-weight counting loses: it lets three dozen uninformative and sign-flipped columns outvote the four that carry signal.
+
+The near cluster is listed three ways deliberately. Counting it as eleven columns double-counts the two `rotate ±1` duplicates, and it also scores higher (0.7436 against 0.7422) purely because three identical columns divide the L2 penalty between them and so face a weaker one. The deduplicated row is the honest number.
 
 **The margin is significant.** McNemar on the same held-out points: 4,707 of 5,000 are scored identically by both attacks, and of the 293 disagreements the augmentation attack wins 224 to 69. Exact two-sided `p = 2.8e-20`, winning 71–81% of disagreements at 95% confidence. The unpaired two-proportion test on the same numbers gives only `z = 3.51`, so discarding the pairing costs sixteen orders of magnitude. This conditions on the trained target and the saved split, so it addresses sampling noise over test points and not the retraining variance in deviation 4 below.
 

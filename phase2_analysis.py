@@ -276,6 +276,13 @@ def run_ablations(results, features, labels, train_idx, test_idx, names):
     identity, not just column 0. Dropping column 0 alone would leave rotate ±1,
     which are bit-identical to it, and the ablation would report no effect while
     the signal was still fully present.
+
+    The near cluster is reported three ways for the same reason. Counting it as
+    eleven columns double-counts the two duplicates, and it also scores higher
+    (0.7436 against 0.7422) purely because three identical columns share the L2
+    penalty between them and so face a weaker one. The deduplicated row is the
+    honest number; the eleven-column row is kept to show the size of the
+    artefact.
     """
     kinds = np.array([name.split()[0] for name in names])
     magnitude = query_magnitudes(results)
@@ -289,24 +296,37 @@ def run_ablations(results, features, labels, train_idx, test_idx, names):
     in_range[IDENTITY_COL] = True
 
     all_cols = np.arange(features.shape[1])
+    near_cols = np.flatnonzero(near)
+    duplicates = identity_group[1:]          # the rotate +/-1 copies of identity
+    small_rotations = np.flatnonzero((kinds == "rotate")
+                                     & (magnitude >= 2) & (magnitude <= 3))
+    one_pixel_shifts = np.flatnonzero((kinds == "translate") & (magnitude == 1))
+
     subsets = [
         ("all queries (published attack)", all_cols),
         ("identity only (= gap attack)", np.array([IDENTITY_COL])),
         ("drop identity group", np.setdiff1d(all_cols, identity_group)),
-        ("near cluster only (|r|<=3, d<=1)", np.flatnonzero(near)),
+        ("near cluster, as 11 columns", near_cols),
+        ("near cluster, duplicates removed", np.setdiff1d(near_cols, duplicates)),
+        ("near cluster, no identity at all", np.setdiff1d(near_cols, identity_group)),
+        ("rotations |r| in 2..3 only", small_rotations),
+        ("translations d=1 only", one_pixel_shifts),
         ("drop near cluster", np.flatnonzero(~near)),
         ("paper in-range only (1<=r<=8, 1<=d<=2)", np.flatnonzero(in_range)),
         ("out-of-range only", np.flatnonzero(~in_range | (all_cols == IDENTITY_COL))),
     ]
 
     gap_baseline = float(results["gap_acc_te"])
+    full_gain = score_subset(features, labels, train_idx, test_idx,
+                             all_cols) - gap_baseline
     print("\n---- ablations (held-out half) ----")
-    print(f"  {'subset':<40} {'n':>3}  {'acc':>6}  {'vs gap':>7}")
+    print(f"  {'subset':<40} {'n':>3}  {'acc':>6}  {'vs gap':>7}  {'of gain':>7}")
     for name, columns in subsets:
         accuracy = score_subset(features, labels, train_idx, test_idx, columns)
+        gain = accuracy - gap_baseline
         print(f"  {name:<40} {len(columns):>3}  {accuracy:>6.4f}  "
-              f"{accuracy - gap_baseline:>+7.4f}")
-    print(f"  (gap baseline = {gap_baseline:.4f})")
+              f"{gain:>+7.4f}  {gain / full_gain:>6.0%}")
+    print(f"  (gap baseline = {gap_baseline:.4f}, full gain = {full_gain:+.4f})")
 
 
 def mcnemar_test(classifier, features, labels, test_idx):
