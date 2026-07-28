@@ -312,6 +312,7 @@ def run_ablations(results, features, labels, train_idx, test_idx, names):
 
     subsets = [
         ("all queries (published attack)", all_cols),
+        ("all queries, duplicates removed", np.setdiff1d(all_cols, duplicates)),
         ("identity only (= gap attack)", np.array([IDENTITY_COL])),
         ("drop identity group", np.setdiff1d(all_cols, identity_group)),
         ("near cluster, as 11 columns", near_cols),
@@ -322,6 +323,9 @@ def run_ablations(results, features, labels, train_idx, test_idx, names):
         ("drop near cluster", np.flatnonzero(~near)),
         ("paper in-range, with identity", np.union1d(np.flatnonzero(in_range),
                                                      [IDENTITY_COL])),
+        ("paper in-range, with identity, deduped",
+         np.setdiff1d(np.union1d(np.flatnonzero(in_range), [IDENTITY_COL]),
+                      duplicates)),
         ("paper in-range, no identity", np.setdiff1d(np.flatnonzero(in_range),
                                                      identity_group)),
         ("out-of-range, with identity", np.union1d(np.flatnonzero(out_of_range),

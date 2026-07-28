@@ -47,6 +47,7 @@ Ablations and a paired significance test, run from the saved vectors without ret
 ```
 subset                                     n     acc   vs gap  of gain
 all queries (published attack)            47  0.7498  +0.0310    100%
+all queries, duplicates removed           45  0.7490  +0.0302     97%
 identity only (= gap attack)               1  0.7188  +0.0000      0%
 drop identity group                       44  0.7490  +0.0302     97%
 near cluster, as 11 columns               11  0.7436  +0.0248     80%
@@ -56,6 +57,7 @@ rotations |r| in 2..3 only                 4  0.7416  +0.0228     74%
 translations d=1 only                      4  0.7160  -0.0028     -9%
 drop near cluster                         36  0.7178  -0.0010     -3%
 paper in-range, with identity             25  0.7478  +0.0290     94%
+paper in-range, with identity, deduped    23  0.7480  +0.0292     94%
 paper in-range, no identity               22  0.7480  +0.0292     94%
 out-of-range, with identity               23  0.7188  +0.0000      0%
 out-of-range, no identity                 22  0.6400  -0.0788   -254%
