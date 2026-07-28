@@ -14,6 +14,7 @@ Run:  python3 phase2_analysis.py
 import ast
 
 import numpy as np
+from scipy.stats import binomtest
 from sklearn.linear_model import LogisticRegression
 
 RESULTS_PATH = "phase2_results.npz"
@@ -308,6 +309,58 @@ def run_ablations(results, features, labels, train_idx, test_idx, names):
     print(f"  (gap baseline = {gap_baseline:.4f})")
 
 
+def mcnemar_test(classifier, features, labels, test_idx):
+    """Paired significance test: does the augmentation attack beat the gap attack?
+
+    Both attacks score the *same* held-out points, so the comparison is paired
+    and an unpaired test would throw away that structure and overstate the
+    uncertainty. McNemar looks only at the points where the two disagree: under
+    the null that neither is better, each disagreement is a coin flip, so the
+    discordant counts are Binomial(b + c, 0.5).
+
+    The exact binomial form is used rather than the chi-square approximation —
+    with a few hundred discordant pairs it costs nothing and needs no continuity
+    correction.
+    """
+    y_true = labels[test_idx]
+    gap_correct = (features[test_idx][:, IDENTITY_COL] == 1) == y_true
+    aug_correct = classifier.predict(features[test_idx]) == y_true
+
+    both = int((gap_correct & aug_correct).sum())
+    gap_only = int((gap_correct & ~aug_correct).sum())
+    aug_only = int((~gap_correct & aug_correct).sum())
+    neither = int((~gap_correct & ~aug_correct).sum())
+    discordant = gap_only + aug_only
+
+    test = binomtest(aug_only, discordant, 0.5)
+    print("\n---- McNemar: augmentation attack vs gap attack ----")
+    print(f"  both correct           : {both}")
+    print(f"  gap only               : {gap_only}")
+    print(f"  augmentation only      : {aug_only}")
+    print(f"  neither                : {neither}")
+    print(f"  discordant pairs       : {discordant}")
+    print(f"  accuracy difference    : {(aug_correct.mean() - gap_correct.mean()):+.4f}")
+    print(f"  exact two-sided p      : {test.pvalue:.3e}")
+    print(f"  95% CI on P(aug wins | disagree): "
+          f"{test.proportion_ci().low:.3f} - {test.proportion_ci().high:.3f}"
+          "   (0.5 = no difference)")
+    print("  the augmentation attack is significantly better ✓"
+          if test.pvalue < 0.05 else
+          "  not significant at p < 0.05 ✗")
+
+    # For contrast: the unpaired two-proportion test, which is what you get by
+    # treating the two accuracies as if they came from separate samples. It
+    # ignores that 4707 of 5000 points are scored identically by both attacks,
+    # and pays for it with a p-value many orders of magnitude weaker.
+    p_aug, p_gap = aug_correct.mean(), gap_correct.mean()
+    n_test = len(y_true)
+    unpaired_se = np.sqrt(p_aug * (1 - p_aug) / n_test
+                          + p_gap * (1 - p_gap) / n_test)
+    print(f"  (unpaired two-proportion z = {(p_aug - p_gap) / unpaired_se:.2f}, "
+          f"SE {unpaired_se:.4f} — discards the pairing)")
+    return test
+
+
 def main():
     results = load_results()
     describe_arrays(results)
@@ -323,6 +376,7 @@ def main():
     summarise_coefficients(classifier, features, train_idx, names)
     refit_without_duplicates(features, labels, train_idx, test_idx, names)
     run_ablations(results, features, labels, train_idx, test_idx, names)
+    mcnemar_test(classifier, features, labels, test_idx)
 
 
 if __name__ == "__main__":
