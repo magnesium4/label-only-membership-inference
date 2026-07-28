@@ -80,7 +80,17 @@ Recorded so the comparison is honest:
 1. **Different augmentation family.** The paper generates `N=3` rotations (`{−r, 0, +r}` for `r ∈ [1,15]`) and `N=4d+1` translations satisfying `|i|+|j|=d` — one fixed shift distance, every direction at it, diagonals included. This implementation steps rotations every degree from −15 to +15 and sweeps translation distances `d=1..4` along the axes only, so it never generates a diagonal shift. The two schemes coincide at `d=1` and diverge from `d=2`.
 2. **Some queries fall outside the paper's working range.** §5.5 reports the attack only clears the baseline for `1 ≤ r ≤ 8` and `1 ≤ d ≤ 2`, since small perturbations rarely change predictions and large ones cause misclassifications regardless of membership. Using `r=15, d=4` puts 22 of the 47 queries outside that window. This was a competing explanation for the modest gain; the in-range ablation above rules it out, since restricting to the paper's window scores 0.7480 against 0.7498 for the full set. Note the out-of-window columns are not empty: alone they score 0.6400, well above chance but well below the gap baseline, and they add nothing on top of the identity query.
 3. **Effect size is in line with the paper.** §5.5 reports 3–4 percentage points for an optimal `r`/`d`; this run gives +3.1, at the bottom of that range. The paper's Figure 2 targets are trained on 2,500 points rather than 5,000, so the overfitting regimes differ and the comparison is suggestive rather than exact.
-4. **The exact digits are not stable across runs.** Both scripts set `torch.manual_seed(0)` and `np.random.seed(0)`, but GPU training is nondeterministic, so retraining the target shifts everything slightly. A rerun moved the headline gain from +0.039 to +0.031 — about a fifth of the effect — while every qualitative conclusion held. Treat the third decimal as noise, and read the paired significance test rather than the point estimate.
+4. **The exact digits are not stable across runs.** Both scripts set `torch.manual_seed(0)` and `np.random.seed(0)`, but GPU training is nondeterministic, so retraining the target shifts everything. Three independent retrainings so far:
+
+   | run | phase 1 MI | gap | count-threshold | augmentation | gain | `best_t` |
+   |---|---|---|---|---|---|---|
+   | 1 | 0.719 | 0.720 | 0.685 | 0.759 | **+0.039** | 20 |
+   | 2 *(analysed here)* | 0.718 | 0.719 | 0.683 | 0.750 | **+0.031** | 23 |
+   | 3 | 0.721 | 0.723 | 0.686 | 0.756 | **+0.033** | 20 |
+
+   The gain spans 0.008, roughly a quarter of its own size, so treat the third decimal as noise. Every ordering held across all three: the augmentation attack beat the gap attack each time, and the count-threshold variant lost to it each time. Members' mean augmented accuracy came out at 0.771 in all three, so the underlying signal is steadier than the attack accuracies are. Read the paired significance test rather than the point estimate, and note it conditions on one target and so does not cover this spread.
+
+   All figures in this README come from **run 2**, whose `.npz` files are the ones committed here. Later runs were not downloaded over them, deliberately — doing so would silently invalidate every number in the analysis and the write-ups.
 5. **The attacker is handed ground-truth membership labels** for half the points, which the real threat model doesn't allow. Shadow models remove that crutch in a later phase.
 
 ## Files
