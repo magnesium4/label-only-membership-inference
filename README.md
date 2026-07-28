@@ -55,9 +55,13 @@ near cluster, no identity at all           8  0.7422  +0.0234     75%
 rotations |r| in 2..3 only                 4  0.7416  +0.0228     74%
 translations d=1 only                      4  0.7160  -0.0028     -9%
 drop near cluster                         36  0.7178  -0.0010     -3%
-paper in-range only (1<=r<=8, 1<=d<=2)    25  0.7478  +0.0290     94%
-out-of-range only                         23  0.7188  +0.0000      0%
+paper in-range, with identity             25  0.7478  +0.0290     94%
+paper in-range, no identity               22  0.7480  +0.0292     94%
+out-of-range, with identity               23  0.7188  +0.0000      0%
+out-of-range, no identity                 22  0.6400  -0.0788   -254%
 ```
+
+Identity is excluded from both range masks so they partition the 46 augmented columns exactly (24 in, 22 out), then added back in one row of each pair. With it, a subset can fall back on the gap signal, which is the fair comparison against the full attack. Without it, you see what those queries know alone.
 
 **The gain is concentrated in a handful of small rotations, and the un-augmented query is redundant.** Four rotations — `±2°` and `±3°` — recover 74% of the effect on their own, without the un-augmented query at all. Widening to the nine distinct queries within `|r| ≤ 3, d ≤ 1` reaches 75%, and the remaining 36 land marginally below the one-query gap baseline. Removing identity costs 0.0008 against the full set and *nothing at all* inside the near cluster, because `rotate ±2` agree with it on 98% of points and stand in for it. The `d=1` translations contribute 0.0006 on top of the rotations and score below the gap baseline alone, so on this target the signal is rotational. Large rotations carry *negative* weight — surviving a 14° rotation is evidence against membership. That is why equal-weight counting loses: it lets three dozen uninformative and sign-flipped columns outvote the four that carry signal.
 
@@ -72,7 +76,7 @@ The near cluster is listed three ways deliberately. Counting it as eleven column
 Recorded so the comparison is honest:
 
 1. **Different augmentation family.** The paper generates `N=3` rotations (`{−r, 0, +r}` for `r ∈ [1,15]`) and `N=4d+1` translations satisfying `|i|+|j|=d` — one fixed shift distance, every direction at it, diagonals included. This implementation steps rotations every degree from −15 to +15 and sweeps translation distances `d=1..4` along the axes only, so it never generates a diagonal shift. The two schemes coincide at `d=1` and diverge from `d=2`.
-2. **Some queries fall outside the paper's working range.** §5.5 reports the attack only clears the baseline for `1 ≤ r ≤ 8` and `1 ≤ d ≤ 2`, since small perturbations rarely change predictions and large ones cause misclassifications regardless of membership. Using `r=15, d=4` puts 22 of the 47 queries outside that window. This was a competing explanation for the modest gain; the in-range ablation above rules it out, since restricting to the paper's window scores 0.7478 against 0.7498 for the full set.
+2. **Some queries fall outside the paper's working range.** §5.5 reports the attack only clears the baseline for `1 ≤ r ≤ 8` and `1 ≤ d ≤ 2`, since small perturbations rarely change predictions and large ones cause misclassifications regardless of membership. Using `r=15, d=4` puts 22 of the 47 queries outside that window. This was a competing explanation for the modest gain; the in-range ablation above rules it out, since restricting to the paper's window scores 0.7480 against 0.7498 for the full set. Note the out-of-window columns are not empty: alone they score 0.6400, well above chance but well below the gap baseline, and they add nothing on top of the identity query.
 3. **Effect size is in line with the paper.** §5.5 reports 3–4 percentage points for an optimal `r`/`d`; this run gives +3.1, at the bottom of that range. The paper's Figure 2 targets are trained on 2,500 points rather than 5,000, so the overfitting regimes differ and the comparison is suggestive rather than exact.
 4. **The exact digits are not stable across runs.** Both scripts set `torch.manual_seed(0)` and `np.random.seed(0)`, but GPU training is nondeterministic, so retraining the target shifts everything slightly. A rerun moved the headline gain from +0.039 to +0.031 — about a fifth of the effect — while every qualitative conclusion held. Treat the third decimal as noise, and read the paired significance test rather than the point estimate.
 5. **The attacker is handed ground-truth membership labels** for half the points, which the real threat model doesn't allow. Shadow models remove that crutch in a later phase.

@@ -291,9 +291,17 @@ def run_ablations(results, features, labels, train_idx, test_idx, names):
     near = (magnitude <= 3) & (kinds == "rotate") | (magnitude <= 1) & (kinds == "translate")
     near[IDENTITY_COL] = True
     # The paper's working window: 1 <= r <= 8 rotations, 1 <= d <= 2 translations.
+    # Identity is deliberately left OUT of both range masks so they partition the
+    # 46 augmented columns exactly (24 in, 22 out). Each is then reported twice,
+    # with and without identity added back: with it, the subset can fall back on
+    # the gap signal, which is the fair comparison against the full attack; without
+    # it, you see what those queries know on their own.
     in_range = (((kinds == "rotate") & (magnitude >= 1) & (magnitude <= 8))
                 | ((kinds == "translate") & (magnitude >= 1) & (magnitude <= 2)))
-    in_range[IDENTITY_COL] = True
+    out_of_range = (((kinds == "rotate") & (magnitude >= 9))
+                    | ((kinds == "translate") & (magnitude >= 3)))
+    assert 1 + in_range.sum() + out_of_range.sum() == features.shape[1], \
+        "the range masks plus identity must partition every query"
 
     all_cols = np.arange(features.shape[1])
     near_cols = np.flatnonzero(near)
@@ -312,8 +320,13 @@ def run_ablations(results, features, labels, train_idx, test_idx, names):
         ("rotations |r| in 2..3 only", small_rotations),
         ("translations d=1 only", one_pixel_shifts),
         ("drop near cluster", np.flatnonzero(~near)),
-        ("paper in-range only (1<=r<=8, 1<=d<=2)", np.flatnonzero(in_range)),
-        ("out-of-range only", np.flatnonzero(~in_range | (all_cols == IDENTITY_COL))),
+        ("paper in-range, with identity", np.union1d(np.flatnonzero(in_range),
+                                                     [IDENTITY_COL])),
+        ("paper in-range, no identity", np.setdiff1d(np.flatnonzero(in_range),
+                                                     identity_group)),
+        ("out-of-range, with identity", np.union1d(np.flatnonzero(out_of_range),
+                                                   [IDENTITY_COL])),
+        ("out-of-range, no identity", np.flatnonzero(out_of_range)),
     ]
 
     gap_baseline = float(results["gap_acc_te"])
