@@ -40,12 +40,33 @@ The augmentation attack beats the gap baseline, reproducing the paper's core cla
 
 **The interesting wrinkle:** the naive **count-threshold** variant — call a point a member if enough of its 47 copies survive — scores **0.683, worse than the gap attack**, even though the threshold is swept and the best one on the attacker's training half is used. The augmented gap (0.771 − 0.516 = 0.255) is much smaller than the raw gap (0.436), so augmentation-robustness on its own is a weaker signal than plain correctness against a target trained without augmentation. The logistic model wins by *weighting* the queries rather than averaging them.
 
+### Offline analysis of Phase 2
+
+Ablations and a paired significance test, run from the saved vectors without retraining anything. The refit reproduces the published 0.7498 exactly, so these are read off the same model that produced it.
+
+```
+subset                                     n     acc   vs gap
+all queries (published attack)            47  0.7498  +0.0310
+identity only (= gap attack)               1  0.7188  +0.0000
+drop identity group                       44  0.7490  +0.0302
+near cluster only (|r|<=3, d<=1)          11  0.7436  +0.0248
+drop near cluster                         36  0.7178  -0.0010
+paper in-range only (1<=r<=8, 1<=d<=2)    25  0.7478  +0.0290
+out-of-range only                         23  0.7188  +0.0000
+```
+
+**The gain is concentrated in small perturbations, and the un-augmented query is redundant.** Eleven near queries recover 80% of the effect; the remaining 36 land marginally below the one-query gap baseline. Removing the identity query altogether costs 0.0008, because `rotate ±2` agree with it on 98% of points and stand in for it. Large rotations carry *negative* weight — surviving a 14° rotation is evidence against membership. That is why equal-weight counting loses: it lets three dozen uninformative and sign-flipped columns outvote the handful that carry signal.
+
+**The margin is significant.** McNemar on the same held-out points: 4,707 of 5,000 are scored identically by both attacks, and of the 293 disagreements the augmentation attack wins 224 to 69. Exact two-sided `p = 2.8e-20`, winning 71–81% of disagreements at 95% confidence. The unpaired two-proportion test on the same numbers gives only `z = 3.51`, so discarding the pairing costs sixteen orders of magnitude. This conditions on the trained target and the saved split, so it addresses sampling noise over test points and not the retraining variance in deviation 4 below.
+
+**Two queries are wasted.** `rotate ±1°` returns the image unchanged: nearest-neighbour interpolation on a 32×32 grid displaces pixels by at most 0.383 px at 1°, below the half-pixel rounding threshold. Those columns are bit-identical to identity on all 10,000 points, so the effective budget is **45 queries, not 47**. It also distorts the raw coefficients, since the L2 penalty splits the gap signal's weight across all three copies — deduplicated, identity fits at +2.14 rather than +1.01.
+
 ## Notes on deviations from the paper
 
 Recorded so the comparison is honest:
 
 1. **Different augmentation family.** The paper generates `N=3` rotations (`{−r, 0, +r}` for `r ∈ [1,15]`) and `N=4d+1` translations satisfying `|i|+|j|=d` — one fixed shift distance, every direction at it, diagonals included. This implementation steps rotations every degree from −15 to +15 and sweeps translation distances `d=1..4` along the axes only, so it never generates a diagonal shift. The two schemes coincide at `d=1` and diverge from `d=2`.
-2. **Some queries fall outside the paper's working range.** §5.5 reports the attack only clears the baseline for `1 ≤ r ≤ 8` and `1 ≤ d ≤ 2`, since small perturbations rarely change predictions and large ones cause misclassifications regardless of membership. Using `r=15, d=4` puts 22 of the 47 queries outside that window — a competing explanation for the modest gain that is not yet ruled out.
+2. **Some queries fall outside the paper's working range.** §5.5 reports the attack only clears the baseline for `1 ≤ r ≤ 8` and `1 ≤ d ≤ 2`, since small perturbations rarely change predictions and large ones cause misclassifications regardless of membership. Using `r=15, d=4` puts 22 of the 47 queries outside that window. This was a competing explanation for the modest gain; the in-range ablation above rules it out, since restricting to the paper's window scores 0.7478 against 0.7498 for the full set.
 3. **Effect size is in line with the paper.** §5.5 reports 3–4 percentage points for an optimal `r`/`d`; this run gives +3.1, at the bottom of that range. The paper's Figure 2 targets are trained on 2,500 points rather than 5,000, so the overfitting regimes differ and the comparison is suggestive rather than exact.
 4. **The exact digits are not stable across runs.** Both scripts set `torch.manual_seed(0)` and `np.random.seed(0)`, but GPU training is nondeterministic, so retraining the target shifts everything slightly. A rerun moved the headline gain from +0.039 to +0.031 — about a fifth of the effect — while every qualitative conclusion held. Treat the third decimal as noise, and read the paired significance test rather than the point estimate.
 5. **The attacker is handed ground-truth membership labels** for half the points, which the real threat model doesn't allow. Shadow models remove that crutch in a later phase.
@@ -56,6 +77,7 @@ Recorded so the comparison is honest:
 |---|---|
 | `phase1_target_and_gap.py` | trains the target CNN, saves it, runs the gap-attack baseline |
 | `phase2_augmentation_attack.py` | builds the 47-query correctness matrix, fits the attack classifier, saves raw vectors to `phase2_results.npz` |
+| `phase2_analysis.py` | offline: refits from the saved vectors, reports coefficients, duplicate queries, ablations and the McNemar test |
 
 Raw per-point results are saved so the analysis can be re-run offline without touching a GPU.
 
@@ -63,7 +85,8 @@ Raw per-point results are saved so the analysis can be re-run offline without to
 
 - [x] Phase 1 — target model + gap baseline
 - [x] Phase 2 — data-augmentation attack
-- [ ] Offline analysis of Phase 2 — logistic coefficients (does the identity query dominate?), a paired McNemar test on the +0.039, accuracy vs. number of queries, and a refit on the in-range queries only
+- [x] Offline analysis of Phase 2 — coefficients, ablations, in-range refit, paired McNemar
+- [ ] Accuracy vs. number of queries — how much of the gain survives on a smaller budget, given that 11 queries already recover 80% of it
 - [ ] Phase 3 — boundary-distance attack
 - [ ] Phase 4 — shadow models, to remove the ground-truth-label assumption
 - [ ] Phase 5 — evaluation and write-up
@@ -76,6 +99,7 @@ Raw per-point results are saved so the analysis can be re-run offline without to
 pip install torch torchvision numpy scikit-learn
 python phase1_target_and_gap.py    # trains the target, writes the checkpoint
 python phase2_augmentation_attack.py
+python phase2_analysis.py          # offline, reads phase2_results.npz
 ```
 
-`torchvision` downloads CIFAR-10 on first run. Phase 1 wants a GPU; Phase 2 is fast either way.
+`torchvision` downloads CIFAR-10 on first run. Phase 1 wants a GPU; Phase 2 is fast either way. `phase2_analysis.py` needs only `numpy`, `scipy` and `scikit-learn`, since it never touches the target model.
