@@ -11,12 +11,16 @@ are all read off that refit, so they are worth precisely as much as the match is
 
 Run:  python3 phase2_analysis.py
 """
+import ast
+
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 
 RESULTS_PATH = "phase2_results.npz"
 MAX_ITER = 1000          # matches the Phase 2 fit; changing it changes the model
 REFIT_TOLERANCE = 1e-12  # lbfgs is deterministic, so only float noise is allowed
+IDENTITY_COL = 0         # column 0 is the un-augmented query = the gap signal
+TOP_N = 10               # how many queries to show at each end of the ranking
 
 
 def load_results(path=RESULTS_PATH):
@@ -110,6 +114,200 @@ def check_reproduction(classifier, features, labels, test_idx, expected_acc):
     return accuracy
 
 
+def query_names(results):
+    """Readable name for each of the 47 queries, in column order.
+
+    Column 0 is the identity (un-augmented) query; its saved parameter is the
+    string "None", so it is named on its own.
+    """
+    return [kind if kind == "identity" else f"{kind} {param}"
+            for kind, param in zip(results["aug_kinds"], results["aug_params"])]
+
+
+def rank_of(values, column):
+    """1-based rank of `column` when `values` is sorted descending by magnitude."""
+    order = np.argsort(-np.abs(values))
+    return int(np.flatnonzero(order == column)[0]) + 1
+
+
+def summarise_coefficients(classifier, features, train_idx, names):
+    """Report which queries the logistic attack actually leans on.
+
+    Two views, because neither alone is honest:
+
+    * the raw coefficient — comparable across columns here only because every
+      feature is binary on the same 0/1 scale, so no standardisation is needed;
+    * the coefficient scaled by the feature's training spread — a query that
+      almost every point survives carries little information however large its
+      coefficient, and this view prices that in.
+
+    Where the two rankings disagree, the disagreement is the finding.
+
+    Caveat worth carrying into the write-up: the 47 columns are heavily
+    correlated (a point correct under identity is usually correct under a 2°
+    rotation), and correlated features make individual logistic coefficients
+    unstable. This says what the fit looks like, not what it depends on — the
+    ablation is what settles dependence.
+    """
+    weights = classifier.coef_[0]
+    spread = features[train_idx].std(axis=0)
+    contributions = weights * spread
+
+    print("\n---- logistic coefficients ----")
+    print(f"  intercept: {classifier.intercept_[0]:+.4f}")
+    print(f"  identity coefficient  : {weights[IDENTITY_COL]:+.4f}"
+          f"  (rank {rank_of(weights, IDENTITY_COL)} of {len(weights)} by |coef|)")
+    print(f"  identity contribution : {contributions[IDENTITY_COL]:+.4f}"
+          f"  (rank {rank_of(contributions, IDENTITY_COL)} of {len(contributions)} by |coef x spread|)")
+    print(f"  identity share of total |coef|: "
+          f"{abs(weights[IDENTITY_COL]) / np.abs(weights).sum():.1%}")
+
+    order = np.argsort(-weights)
+    print(f"\n  top {TOP_N} by signed coefficient (evidence FOR membership):")
+    for col in order[:TOP_N]:
+        print(f"    {names[col]:<16} {weights[col]:+.4f}   x spread {contributions[col]:+.4f}")
+    print(f"\n  bottom {TOP_N} by signed coefficient (evidence AGAINST membership):")
+    for col in order[-TOP_N:]:
+        print(f"    {names[col]:<16} {weights[col]:+.4f}   x spread {contributions[col]:+.4f}")
+
+    print("\n  by augmentation family:")
+    kinds = np.array([name.split()[0] for name in names])
+    for kind in ["identity", "rotate", "translate"]:
+        mask = kinds == kind
+        print(f"    {kind:<10} n={mask.sum():<3} "
+              f"sum|coef| {np.abs(weights[mask]).sum():6.3f}   "
+              f"mean|coef| {np.abs(weights[mask]).mean():6.4f}")
+    return weights
+
+
+def find_duplicate_queries(features, names):
+    """Find queries whose correctness column is bit-identical to another's.
+
+    These are wasted queries: they cost the attacker a query to the target and
+    return information already held. They also distort the coefficients, because
+    the L2 penalty splits weight evenly across identical columns — so a signal
+    with k copies looks 1/k as important as it is.
+
+    Returns (keep_cols, groups): the first occurrence of each distinct column,
+    and the duplicate groups as lists of names.
+    """
+    _, first_occurrence, membership = np.unique(features.T, axis=0,
+                                                return_index=True,
+                                                return_inverse=True)
+    keep_cols = np.sort(first_occurrence)
+    groups = [[names[col] for col in np.flatnonzero(membership == g)]
+              for g in np.unique(membership)
+              if (membership == g).sum() > 1]
+    return keep_cols, groups
+
+
+def refit_without_duplicates(features, labels, train_idx, test_idx, names):
+    """Refit on distinct columns only, so coefficients are read off a full-rank fit.
+
+    Accuracy should barely move — duplicate columns carry no extra information —
+    but the coefficients become interpretable, since weight is no longer being
+    divided among copies of the same query.
+    """
+    keep_cols, groups = find_duplicate_queries(features, names)
+    print("\n---- duplicate queries ----")
+    if not groups:
+        print("  none; all queries are distinct")
+        return None
+    for group in groups:
+        print(f"  identical columns: {', '.join(group)}")
+    print(f"  {len(keep_cols)} distinct of {features.shape[1]} queries "
+          f"({features.shape[1] - len(keep_cols)} wasted)")
+
+    classifier = LogisticRegression(max_iter=MAX_ITER).fit(
+        features[train_idx][:, keep_cols], labels[train_idx])
+    accuracy = classifier.score(features[test_idx][:, keep_cols], labels[test_idx])
+    print(f"  deduplicated refit accuracy: {accuracy:.4f}")
+
+    weights = classifier.coef_[0]
+    identity = int(np.flatnonzero(keep_cols == IDENTITY_COL)[0])
+    print(f"  identity coefficient: {weights[identity]:+.4f} "
+          f"(rank {rank_of(weights, identity)} of {len(weights)}, "
+          f"{abs(weights[identity]) / np.abs(weights).sum():.1%} of total |coef|)")
+    kept_names = [names[col] for col in keep_cols]
+    print("  top 5 by signed coefficient:")
+    for col in np.argsort(-weights)[:5]:
+        print(f"    {kept_names[col]:<18} {weights[col]:+.4f}")
+    return classifier
+
+
+def query_magnitudes(results):
+    """Perturbation size per query: rotation in degrees, translation in pixels.
+
+    Identity is 0. Translations are stored as the string form of a (dx, dy)
+    tuple, only ever axis-aligned here, so the magnitude is the non-zero entry.
+    """
+    magnitudes = []
+    for kind, param in zip(results["aug_kinds"], results["aug_params"]):
+        if kind == "identity":
+            magnitudes.append(0.0)
+        elif kind == "rotate":
+            magnitudes.append(abs(float(param)))
+        else:
+            dx, dy = ast.literal_eval(param)
+            magnitudes.append(float(max(abs(dx), abs(dy))))
+    return np.array(magnitudes)
+
+
+def score_subset(features, labels, train_idx, test_idx, columns):
+    """Refit the attack on a subset of queries and score it on the held-out half.
+
+    Same solver and penalty as the full attack, so the only thing varying across
+    ablations is which queries the attacker is allowed to ask.
+    """
+    columns = np.atleast_1d(columns)
+    classifier = LogisticRegression(max_iter=MAX_ITER).fit(
+        features[train_idx][:, columns], labels[train_idx])
+    return classifier.score(features[test_idx][:, columns], labels[test_idx])
+
+
+def run_ablations(results, features, labels, train_idx, test_idx, names):
+    """Measure what the attack actually depends on by removing queries.
+
+    Coefficients describe a fit; ablations test dependence. With 47 heavily
+    correlated columns only the second is trustworthy.
+
+    Note the identity ablation drops the whole *group* of columns identical to
+    identity, not just column 0. Dropping column 0 alone would leave rotate ±1,
+    which are bit-identical to it, and the ablation would report no effect while
+    the signal was still fully present.
+    """
+    kinds = np.array([name.split()[0] for name in names])
+    magnitude = query_magnitudes(results)
+    identity_group = np.flatnonzero(
+        (features == features[:, [IDENTITY_COL]]).all(axis=0))
+    near = (magnitude <= 3) & (kinds == "rotate") | (magnitude <= 1) & (kinds == "translate")
+    near[IDENTITY_COL] = True
+    # The paper's working window: 1 <= r <= 8 rotations, 1 <= d <= 2 translations.
+    in_range = (((kinds == "rotate") & (magnitude >= 1) & (magnitude <= 8))
+                | ((kinds == "translate") & (magnitude >= 1) & (magnitude <= 2)))
+    in_range[IDENTITY_COL] = True
+
+    all_cols = np.arange(features.shape[1])
+    subsets = [
+        ("all queries (published attack)", all_cols),
+        ("identity only (= gap attack)", np.array([IDENTITY_COL])),
+        ("drop identity group", np.setdiff1d(all_cols, identity_group)),
+        ("near cluster only (|r|<=3, d<=1)", np.flatnonzero(near)),
+        ("drop near cluster", np.flatnonzero(~near)),
+        ("paper in-range only (1<=r<=8, 1<=d<=2)", np.flatnonzero(in_range)),
+        ("out-of-range only", np.flatnonzero(~in_range | (all_cols == IDENTITY_COL))),
+    ]
+
+    gap_baseline = float(results["gap_acc_te"])
+    print("\n---- ablations (held-out half) ----")
+    print(f"  {'subset':<40} {'n':>3}  {'acc':>6}  {'vs gap':>7}")
+    for name, columns in subsets:
+        accuracy = score_subset(features, labels, train_idx, test_idx, columns)
+        print(f"  {name:<40} {len(columns):>3}  {accuracy:>6.4f}  "
+              f"{accuracy - gap_baseline:>+7.4f}")
+    print(f"  (gap baseline = {gap_baseline:.4f})")
+
+
 def main():
     results = load_results()
     describe_arrays(results)
@@ -120,6 +318,11 @@ def main():
     classifier = refit_attack_classifier(features, labels, train_idx)
     check_reproduction(classifier, features, labels, test_idx,
                        expected_acc=float(results["aug_acc"]))
+
+    names = query_names(results)
+    summarise_coefficients(classifier, features, train_idx, names)
+    refit_without_duplicates(features, labels, train_idx, test_idx, names)
+    run_ablations(results, features, labels, train_idx, test_idx, names)
 
 
 if __name__ == "__main__":
