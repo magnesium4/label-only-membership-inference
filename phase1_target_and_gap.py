@@ -33,7 +33,12 @@ member_set    = Subset(full, member_idx)
 nonmember_set = Subset(full, nonmember_idx)
 train_loader  = DataLoader(member_set, batch_size=128, shuffle=True)
 
-# ---- Model (a small CNN, ~ the paper's 4-layer conv net) ----------------
+# ---- Model (a small CNN, SHALLOWER than the paper's) --------------------
+# The paper's CNN has four convolution layers (32, 32, 64, 64) with a max-pool between
+# the pairs, then one fully-connected layer of 512, for 1.2M parameters. This one has
+# two convolution layers (32, 64) and two fully-connected layers (128, 10), for 0.55M.
+# Less capacity means a different overfitting regime, so this is a real deviation and
+# is recorded as such in the README.
 class SmallCNN(nn.Module):
     def __init__(self):
         super().__init__()
@@ -87,8 +92,11 @@ theory = 0.5 + (train_acc - test_acc) / 2
 print(f"GAP-ATTACK MI accuracy: {mi_acc:.3f}  (theory 1/2+(acc_tr-acc_te)/2 = {theory:.3f})")
 
 # ---- Save (target model + splits + results) for later phases ------------
-# Phase 2 (augmentation) reuses the SAME target model + member/non-member indices,
-# and we keep raw results so we can re-analyse offline (same habit as the evals repo).
+# Phase 2 (augmentation) reuses the SAME target model + member/non-member indices.
+# The raw per-point results are saved too, not just the summary accuracies. Training
+# is the expensive step and GPU training is nondeterministic, so a later question
+# answered by retraining is answered against a slightly different model. Anything
+# recomputable from saved outputs should be recomputed, not retrained.
 torch.save(model.state_dict(), "target_model.pt")
 np.savez("phase1_results.npz",
          member_idx=member_idx, nonmember_idx=nonmember_idx,

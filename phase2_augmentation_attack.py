@@ -12,12 +12,12 @@ vectors -> predict membership. It has to beat the Phase 1 gap baseline (0.719).
 Reuses Phase 1's saved target_model.pt + the SAME member/non-member indices, so the
 comparison is apples-to-apples.
 
-  !! EXPECTATION-SETTING !!
-  Our Phase 1 target was trained WITHOUT augmentation (on purpose, to overfit).
-  The augmentation attack is strongest when the target was trained WITH the same
-  augmentations, because then members are specifically robust to them. So this may
-  only modestly beat the gap baseline. That result is itself the answer to the
-  question of what happens with models not trained with augmentation.
+On the size of the effect to expect here: the Phase 1 target was trained without
+augmentation, deliberately, so that it overfits. The attack has most to work with
+when the target was itself trained on the same augmentations, since members are then
+specifically robust to them. The paper evaluates targets trained both ways and finds
+that augmented training increases leakage, so a smaller margin against this target is
+the expected outcome and not a new result.
 
 Run on Google Colab: Runtime > Change runtime type > GPU.
 """
@@ -64,8 +64,12 @@ model.load_state_dict(torch.load("target_model.pt", map_location=device))
 model.eval()
 
 # ---- The augmentation set ------------------------------------------------
-# Paper-style: 2r+1 rotations and 4d+1 translations. Index 0 is the IDENTITY,
-# so column 0 of the feature matrix is exactly the Phase 1 gap-attack signal.
+# This is NOT the paper's budget. It uses N=3 rotations and N=4d+1 translations at a
+# single shift distance with diagonals included; this steps rotations every degree
+# from -15 to +15 and sweeps translation distances 1..4 along the axes only, so it
+# never generates a diagonal shift. See "deviations from the paper" in the README.
+# Index 0 is the IDENTITY, so column 0 of the feature matrix is exactly the Phase 1
+# gap-attack signal.
 ROT_R, TRANS_D = 15, 4          # degrees, pixels (Phase 4 will tune these on shadow models)
 
 augs = [("identity", None)]
@@ -142,7 +146,10 @@ print(f"augmentation attack (logistic) : {aug_acc:.3f}")
 print(f"improvement over gap           : {aug_acc - gap_acc_te:+.3f}")
 print("BEATS the gap baseline ✓" if aug_acc > gap_acc_te else "does NOT beat the gap baseline ✗")
 
-# ---- Save raw results; analyse offline later (same habit as the evals repo) ----
+# ---- Save the raw per-point vectors, not just the scores ------------------------
+# The scores answer one question. The vectors answer any number of later ones, offline
+# and without a GPU. Retraining to recover them would not reproduce this exact model,
+# so whatever is not saved here is effectively lost.
 np.savez("phase2_results.npz",
          X_mem=X_mem, X_non=X_non,
          member_idx=member_idx, nonmember_idx=nonmember_idx,

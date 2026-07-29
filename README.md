@@ -92,6 +92,7 @@ Recorded so the comparison is honest:
 
    All figures in this README come from **run 2**, whose `.npz` files are the ones committed here. Later runs were not downloaded over them, deliberately — doing so would silently invalidate every number in the analysis and the write-ups.
 5. **The attacker is handed ground-truth membership labels** for half the points, which the real threat model doesn't allow. Shadow models remove that crutch in a later phase.
+6. **A shallower target than the paper's.** The paper uses two architectures, a CNN with **four** convolution layers (32, 32, 64, 64, max-pool between the pairs) followed by one fully-connected layer of 512 — 1.2M parameters — and a Wide ResNet-28 at 1.4M. The target here has **two** convolution layers (32, 64) and two fully-connected layers (128, 10), for **0.55M parameters**, roughly 45% of their CNN. The train/test gap is the quantity every attack here exploits, so target capacity is not a cosmetic difference. Note though that it was not the binding constraint on memorisation: this target still reaches **train accuracy 1.000**, so 0.55M parameters were ample to fit 5,000 points, and the gap is set by the test-side accuracy rather than by any failure to memorise. The training-set size is the difference with a clear direction — their Figure 2 targets see 2,500 points to this one's 5,000, and more data generalises better, which narrows the gap here.
 
 ## Files
 
@@ -100,15 +101,32 @@ Recorded so the comparison is honest:
 | `phase1_target_and_gap.py` | trains the target CNN, saves it, runs the gap-attack baseline |
 | `phase2_augmentation_attack.py` | builds the 47-query correctness matrix, fits the attack classifier, saves raw vectors to `phase2_results.npz` |
 | `phase2_analysis.py` | offline: refits from the saved vectors, reports coefficients, duplicate queries, ablations and the McNemar test |
+| `target_model.pt` | the run-2 target checkpoint (2.1 MB), committed so the numbers here are checkable |
+| `phase1_results.npz`, `phase2_results.npz` | raw per-point results from run 2 — indices, correctness matrices and scores. No image data. |
 
-Raw per-point results are saved so the analysis can be re-run offline without touching a GPU.
+Raw per-point results are saved so the analysis can be re-run offline without touching a GPU. The
+target checkpoint is committed for the same reason: GPU training is nondeterministic, so retraining
+produces a *different* model and cannot regenerate these matrices. Without the checkpoint, "all
+figures come from run 2" would be an assertion rather than something you can verify.
+
+CIFAR-10 itself is not in this repository — `torchvision` downloads it on first run.
+
+## Data
+
+CIFAR-10, from Alex Krizhevsky, *Learning Multiple Layers of Features from Tiny Images*, technical
+report, University of Toronto, 2009. The dataset carries no explicit open licence; citing that
+report is what its author asks for, which is why it is cited here.
+
+Worth knowing about the provenance: CIFAR-10 is drawn from the **80 Million Tiny Images** dataset,
+which its creators withdrew in 2020 after offensive labels and content were documented in it.
+CIFAR-10 was not withdrawn and remains a standard benchmark, but the lineage is a known issue.
 
 ## Status
 
 - [x] Phase 1 — target model + gap baseline
 - [x] Phase 2 — data-augmentation attack
 - [x] Offline analysis of Phase 2 — coefficients, ablations, in-range refit, paired McNemar
-- [ ] Accuracy vs. number of queries — how much of the gain survives on a smaller budget, given that 11 queries already recover 80% of it
+- [ ] Accuracy vs. number of queries — how much of the gain survives on a smaller budget, given that 9 distinct queries already recover 75% of it
 - [ ] Phase 3 — boundary-distance attack
 - [ ] Phase 4 — shadow models, to remove the ground-truth-label assumption
 - [ ] Phase 5 — evaluation and write-up
