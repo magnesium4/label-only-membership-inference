@@ -4,7 +4,7 @@ Reproducing **Choquette-Choo, Tramèr, Carlini & Papernot, _"Label-Only Membersh
 
 **The claim under test:** even with access to nothing but hard predicted labels — no confidence scores — an attacker can infer training-set membership about as well as prior confidence-based attacks, by measuring how robust a point's classification is to small perturbations. Members are more robust because the model overfit to them.
 
-Write-ups of each phase are at [mgohar.com](https://mgohar.com) (series: *Label-Only Membership Inference*).
+Write-ups of each phase: **[Label-Only Membership Inference](https://mgohar.com/series/label-only-membership-inference/)** at mgohar.com.
 
 ## Setup
 
