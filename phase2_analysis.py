@@ -14,7 +14,7 @@ Run:  python3 phase2_analysis.py
 import ast
 
 import numpy as np
-from scipy.stats import binomtest
+from scipy.stats import binom, binomtest, norm
 from sklearn.linear_model import LogisticRegression
 
 RESULTS_PATH = "phase2_results.npz"
@@ -378,6 +378,13 @@ def mcnemar_test(classifier, features, labels, test_idx):
     print(f"  discordant pairs       : {discordant}")
     print(f"  accuracy difference    : {(aug_correct.mean() - gap_correct.mean()):+.4f}")
     print(f"  exact two-sided p      : {test.pvalue:.3e}")
+    # The two tails that p is made of. At p=0.5 the binomial is symmetric, so the
+    # outcomes at least as improbable as the observed one are exactly the two ends,
+    # and they are equal -- the two-sided p is just twice either tail.
+    upper_tail = binom.sf(aug_only - 1, discordant, 0.5)   # P(X >= aug_only)
+    lower_tail = binom.cdf(gap_only, discordant, 0.5)      # P(X <= gap_only)
+    print(f"    P(X >= {aug_only}) = {upper_tail:.6e}")
+    print(f"    P(X <= {gap_only:>3}) = {lower_tail:.6e}   (sum = {upper_tail + lower_tail:.6e})")
     print(f"  95% CI on P(aug wins | disagree): "
           f"{test.proportion_ci().low:.3f} - {test.proportion_ci().high:.3f}"
           "   (0.5 = no difference)")
@@ -393,8 +400,14 @@ def mcnemar_test(classifier, features, labels, test_idx):
     n_test = len(y_true)
     unpaired_se = np.sqrt(p_aug * (1 - p_aug) / n_test
                           + p_gap * (1 - p_gap) / n_test)
-    print(f"  (unpaired two-proportion z = {(p_aug - p_gap) / unpaired_se:.2f}, "
-          f"SE {unpaired_se:.4f} — discards the pairing)")
+    unpaired_z = (p_aug - p_gap) / unpaired_se
+    # z against a standard normal, two-sided for the same reason the exact test is:
+    # a difference this size the other way would have been equally notable.
+    unpaired_p = 2 * norm.sf(abs(unpaired_z))
+    print(f"  (unpaired two-proportion z = {unpaired_z:.2f}, SE {unpaired_se:.4f}, "
+          f"p = {unpaired_p:.3e} — discards the pairing)")
+    print(f"   the pairing is worth {np.log10(unpaired_p / test.pvalue):.1f} "
+          f"orders of magnitude here")
     return test
 
 
