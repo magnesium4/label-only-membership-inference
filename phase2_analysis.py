@@ -398,6 +398,109 @@ def mcnemar_test(classifier, features, labels, test_idx):
     return test
 
 
+def check_separability(features, labels):
+    """Do any two points share a query vector but disagree on membership?
+
+    This decides whether the textbook story about L2 applies. On separable data an
+    unpenalised log-loss has no finite minimum: scaling every weight up pushes each
+    correct probability towards 1, the loss towards 0, and the weights run away. That
+    is the usual motivation for the penalty. It needs separability, and if any query
+    vector carries both labels the data is not separable — some of those points must
+    be wrong under any weights, and scaling up sends their probability towards 0 where
+    the log-loss diverges. The minimum is then finite with no penalty at all.
+    """
+    print("\n---- linear separability ----")
+    vectors = [row.tobytes() for row in features.astype(np.uint8)]
+    labels_by_vector = {}
+    count_by_vector = {}
+    for vector, label in zip(vectors, labels):
+        labels_by_vector.setdefault(vector, set()).add(label)
+        count_by_vector[vector] = count_by_vector.get(vector, 0) + 1
+
+    conflicted = [v for v, seen in labels_by_vector.items() if len(seen) > 1]
+    points = sum(count_by_vector[v] for v in conflicted)
+    print(f"  {len(labels_by_vector)} distinct query vectors over {len(features)} points")
+    print(f"  {len(conflicted)} carry BOTH labels, covering {points} points "
+          f"({points / len(features):.1%})")
+    print("  => not linearly separable"
+          if conflicted else "  => separable; weights would diverge unpenalised")
+    return conflicted
+
+
+def describe_intercept(classifier, features, labels, train_idx):
+    """Report the fitted intercept and what forcing it to zero would do.
+
+    The intercept is not attached to any input, so scikit-learn leaves it out of the
+    penalty: shrinking it would not reduce how much the model leans on its queries,
+    only miscalibrate the overall level. Worth printing because the fitted value looks
+    surprising on a balanced problem — the queries are almost all 1s and most weights
+    are positive, so the weighted sum is large and positive for nearly every point and
+    the intercept is what cancels it back down.
+    """
+    intercept = float(classifier.intercept_[0])
+    print("\n---- intercept ----")
+    print(f"  fitted b = {intercept:+.4f}   sigmoid(b) = {1 / (1 + np.exp(-intercept)):.4f}")
+    print(f"  members in the attacker's training half: {labels[train_idx].mean():.4f}")
+
+    fitted_mean = classifier.predict_proba(features[train_idx])[:, 1].mean()
+    classifier.intercept_[:] = 0.0
+    zeroed_mean = classifier.predict_proba(features[train_idx])[:, 1].mean()
+    classifier.intercept_[:] = intercept  # restore; later steps reuse this fit
+    print(f"  mean P(member): {fitted_mean:.4f} as fitted, "
+          f"{zeroed_mean:.4f} with b forced to 0")
+    return intercept
+
+
+def check_duplicate_penalty_split(features, labels, train_idx, names):
+    """Show that the duplicate columns' low coefficients are the L2 penalty splitting.
+
+    Splitting an effective weight t across k identical columns costs k(t/k)^2 = t^2/k,
+    a k-th of what one column pays for the same effect, so the group is charged as if
+    the penalty were k times weaker and the fit buys more weight than it otherwise
+    would. Charging a single deduplicated column that same fraction should recover the
+    group's total exactly, since the two are the same optimisation problem.
+
+    Scaling a column by sqrt(k) is how that is arranged here: the fitted weight scales
+    by 1/sqrt(k) to give the same contribution, so its penalty share becomes 1/k while
+    every other column's is untouched.
+
+    Fitted in float64 at a higher iteration cap than the rest of this file, because the
+    claim is an exact equality. At MAX_ITER in float32 the two agree only to about three
+    decimals, and that residual is lbfgs stopping early rather than a real difference.
+    The reproduction check above deliberately keeps the original settings.
+    """
+    tight_iter = 10 * MAX_ITER
+    features64 = features.astype(np.float64)
+    print("\n---- why the duplicated identity coefficient looked small ----")
+    group = [col for col in range(features.shape[1])
+             if (features[:, col] == features[:, IDENTITY_COL]).all()]
+    if len(group) < 2:
+        print("  identity has no duplicates; nothing to explain")
+        return None
+
+    full = LogisticRegression(max_iter=tight_iter).fit(features64[train_idx], labels[train_idx])
+    group_sum = full.coef_[0][group].sum()
+    print(f"  identity group: {', '.join(names[col] for col in group)}")
+    print(f"  each {full.coef_[0][group[0]]:+.4f}, group sum {group_sum:+.4f}")
+
+    keep_cols = [col for col in range(features.shape[1]) if col not in group[1:]]
+    identity = keep_cols.index(IDENTITY_COL)
+    deduped = LogisticRegression(max_iter=tight_iter).fit(
+        features64[train_idx][:, keep_cols], labels[train_idx])
+    deduped_weight = deduped.coef_[0][identity]
+    print(f"  deduplicated, identity fits at {deduped_weight:+.4f}")
+
+    k = len(group)
+    scaled = features64[:, keep_cols].copy()
+    scaled[:, identity] *= np.sqrt(k)
+    relaxed = LogisticRegression(max_iter=tight_iter).fit(scaled[train_idx], labels[train_idx])
+    effective = relaxed.coef_[0][identity] * np.sqrt(k)
+    gap = group_sum - deduped_weight
+    print(f"  charging that one column 1/{k} of the penalty: {effective:+.4f} "
+          f"({(effective - deduped_weight) / gap:.0%} of the {gap:.4f} gap)")
+    return effective
+
+
 def main():
     results = load_results()
     describe_arrays(results)
@@ -410,8 +513,11 @@ def main():
                        expected_acc=float(results["aug_acc"]))
 
     names = query_names(results)
+    check_separability(features, labels)
+    describe_intercept(classifier, features, labels, train_idx)
     summarise_coefficients(classifier, features, train_idx, names)
     refit_without_duplicates(features, labels, train_idx, test_idx, names)
+    check_duplicate_penalty_split(features, labels, train_idx, names)
     run_ablations(results, features, labels, train_idx, test_idx, names)
     mcnemar_test(classifier, features, labels, test_idx)
 
